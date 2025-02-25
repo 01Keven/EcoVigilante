@@ -21,6 +21,12 @@
 #define JOYSTICK_X_PIN 26   // Pino do eixo X do joystick
 #define JOYSTICK_Y_PIN 27   // Pino do eixo Y do joystick
 #define JOYSTICK_DEADZONE 40  // Zona morta do joystick
+#define BUZZER_PIN 21  // Zona morta do joystick
+// Frequência do buzzer (em Hz)
+// Frequência do buzzer (em Hz)
+#define BUZZER_FREQUENCY 1000  // Frequência padrão do buzzer
+
+
 
 // Ajuste do centro do joystick
 #define JOYSTICK_CENTER_X 1939 // Valor de centro do eixo X
@@ -37,8 +43,8 @@ static volatile uint32_t last_button_joy_time = 0;  // Controle de debounce do b
 static volatile bool is_border_thick = false;  // Alterna a espessura da borda
 static volatile bool is_square_red = true;    // Controle da cor do quadrado
 
-// Variável para armazenar a temperatura
-int temperatura = 20;  // Temperatura inicial, por exemplo, 20°C
+// Variável para armazenar o estado do joystick
+static volatile bool joystick_activated = false;
 
 // Prototipos das funções de interrupção
 static void gpio_irq_handler(uint gpio, uint32_t events);
@@ -50,7 +56,17 @@ void pwm_setup(uint pin) {
     pwm_set_clkdiv(slice, 4.0);  // Configura o divisor de clock do PWM
     pwm_set_wrap(slice, 65535);  // Define o valor máximo do contador PWM
     pwm_set_gpio_level(pin, 0);  // Inicializa o nível do PWM em 0 (desligado)
-    pwm_set_enabled(slice, true);// Habilita o PWM no slice
+    pwm_set_enabled(slice, true); // Habilita o PWM no slice
+}
+
+// Inicializa o PWM para o buzzer e ajusta a frequência
+void pwm_buzzer_setup(uint pin, int frequency) {
+    pwm_setup(pin);  // Configura o pino do buzzer como PWM
+    uint slice = pwm_gpio_to_slice_num(pin);  // Obtém o slice do pino
+    uint32_t pwm_clock = clock_get_hz(clk_sys);  // Obtém o clock do sistema
+    uint32_t clkdiv = (float)pwm_clock / (frequency * 65536);  // Calcula o divisor de clock para a frequência desejada
+    pwm_set_clkdiv(slice, clkdiv);  // Ajusta o divisor de clock
+    pwm_set_wrap(slice, 65535);  // Define o valor máximo do contador PWM
 }
 
 // Lê um valor do ADC
@@ -79,66 +95,24 @@ int map_adc_to_screen(int adc_value, int center_value, int screen_max) {
     return mapped_value;
 }
 
-// Atualiza a temperatura com base no movimento do joystick
-void update_temperature() {
-    uint16_t adc_y = read_adc(0);  // Lê o valor do eixo Y do joystick
 
-    // Calcula o deslocamento do eixo Y
-    int16_t offset_y = adc_y - JOYSTICK_CENTER_Y;
-
-    // Verifica se o deslocamento ultrapassa a zona morta
-    if (offset_y > JOYSTICK_DEADZONE) {
-        temperatura += 1;  // Aumenta a temperatura
-    } else if (offset_y < -JOYSTICK_DEADZONE) {
-        temperatura -= 1;  // Diminui a temperatura
-    }
-
-    // Limita a temperatura dentro dos valores extremos
-    if (temperatura < 0) temperatura = 0;
-    if (temperatura > 50) temperatura = 50;
-}
-
-
-// Desenha a borda no display
-void draw_border(ssd1306_t *ssd) {
-    int thickness = is_border_thick ? 3 : 1; // Define a espessura da borda
-
-    // Desenha as linhas horizontais e verticais para a borda
-    for (int i = 0; i < thickness; i++) {
-        ssd1306_hline(ssd, 0, SCREEN_WIDTH - 2, i, true);
-        ssd1306_hline(ssd, 0, SCREEN_WIDTH - 2, SCREEN_HEIGHT - 2 - i, true);
-        ssd1306_vline(ssd, i, 0, SCREEN_HEIGHT - 2, true);
-        ssd1306_vline(ssd, SCREEN_WIDTH - 2 - i, 0, SCREEN_HEIGHT - 2, true);
-    }
-}
-
-// Atualiza o display SSD1306
-// Atualiza o display SSD1306
-void update_display(ssd1306_t *ssd) {
-    ssd1306_fill(ssd, false);  // Limpa a tela
-    draw_border(ssd);  // Desenha a borda
-
-    // Desenha a temperatura na tela
-    char temp_str[16];
-    snprintf(temp_str, sizeof(temp_str), "Temp: %d C", temperatura);
-    ssd1306_draw_string(ssd, temp_str, 0, 0);  // Passa o ponteiro correto e remove o 'true'
-
-    ssd1306_send_data(ssd);  // Envia os dados para o display
-}
-
+// Definição da variável temperatura
+int temperatura = 0;  // Temperatura inicial como 28°C
+// Variável global para controlar se a temperatura foi fixada
+static volatile bool is_temperature_locked = false; 
 
 // Função de interrupção para o GPIO
 static void gpio_irq_handler(uint gpio, uint32_t events) {
     if (gpio == BUTTON_A) {
-        // Lógica do botão A
         uint32_t current_time = time_us_32();
         if (current_time - last_button_a_time > 200000) { // Evita debounce
             last_button_a_time = current_time;
-            is_border_thick = !is_border_thick;  // Alterna a espessura da borda
+
+            // Alterna a fixação da temperatura
+            is_temperature_locked = !is_temperature_locked;
         }
     }
     if (gpio == BUTTON_JOY) {
-        // Lógica do botão do joystick
         uint32_t current_time = time_us_32();
         if (current_time - last_button_joy_time > 200000) { // Evita debounce
             last_button_joy_time = current_time;
@@ -147,8 +121,97 @@ static void gpio_irq_handler(uint gpio, uint32_t events) {
     }
 }
 
-int main() {   
+
+// Atualiza a temperatura com base no movimento do joystick
+// Função de atualização da temperatura com base no movimento do joystick
+// Função para atualizar a temperatura com base no movimento do joystick
+void update_temperature() {
+    gpio_init(BUZZER_PIN);
+    gpio_set_dir(BUZZER_PIN, GPIO_OUT);
+
+    pwm_buzzer_setup(BUZZER_PIN, BUZZER_FREQUENCY);
+    uint16_t adc_y = read_adc(0);  // Lê o valor do eixo Y do joystick
+
+    // Calcula o deslocamento do eixo Y
+    int16_t offset_y = adc_y - JOYSTICK_CENTER_Y;
+
+    // Verifica se o joystick foi movido além da zona morta
+    if (abs(offset_y) > JOYSTICK_DEADZONE) {
+        joystick_activated = true; // Ativa o joystick quando ele é movido
+    }
+
+    // Só altera a temperatura se o joystick foi ativado e a temperatura não estiver fixada
+    if (joystick_activated && !is_temperature_locked) {
+        // Se o joystick foi movido para cima (temperatura deve subir)
+        if (offset_y > JOYSTICK_DEADZONE) {
+            temperatura += 1;  // Aumenta a temperatura lentamente (um grau por vez)
+        }
+        // Se o joystick foi movido para baixo (temperatura deve diminuir)
+        else if (offset_y < -JOYSTICK_DEADZONE) {
+            // Tenta diminuir a temperatura
+            if (temperatura > 28) {
+                temperatura -= 1;  // Diminui a temperatura lentamente (um grau por vez)
+            }
+        }
+
+        // Limita a temperatura dentro dos valores extremos
+        if (temperatura < 10) temperatura = 10; // Garante que a temperatura não seja menor que 28
+        if (temperatura > 50) temperatura = 50; // Limita o valor máximo
+    }
+
+    // Lógica para acender os LEDs conforme a temperatura
+    // Se a temperatura passar de 38, acende o LED vermelho completamente
+    if (temperatura > 38) {
+        pwm_set_gpio_level(LED_RED, 65535);  // Acende o LED vermelho com a intensidade máxima
+        gpio_put(LED_GREEN, 0);  // Apaga o LED verde
+        gpio_put(LED_BLUE, 0);   // Apaga o LED azul
+
+        pwm_set_gpio_level(BUZZER_PIN, 12767);  // Emite som médio no buzzer
+        sleep_ms(500);  // Buzzer faz som por 500ms
+        pwm_set_gpio_level(BUZZER_PIN, 0);  // Desliga o buzzer após 500ms
+    } else if (temperatura > 34) {
+        gpio_put(LED_GREEN, 1);  // Acende o LED verde
+        gpio_put(LED_RED, 0);    // Apaga o LED vermelho
+        gpio_put(LED_BLUE, 0);   // Apaga o LED azul
+
+        pwm_set_gpio_level(BUZZER_PIN, 32767);  // Emite som médio no buzzer
+        sleep_ms(500);  // Buzzer faz som por 500ms
+        pwm_set_gpio_level(BUZZER_PIN, 0);  // Desliga o buzzer após 500ms
+    } else {
+        // Se a temperatura estiver abaixo de 34, apaga todos os LEDs
+        gpio_put(LED_GREEN, 0);
+        gpio_put(LED_RED, 0);
+        gpio_put(LED_BLUE, 0);
+        pwm_set_gpio_level(LED_RED, 0);
+        // Desativa o buzzer
+        gpio_put(BUZZER_PIN, 0);  // Desliga o buzzer
+    }
+}
+
+
+// Função de atualização do display
+void update_display(ssd1306_t *ssd) {
+    ssd1306_fill(ssd, false);  // Limpa a tela
+
+    // Desenha a temperatura na tela
+    char temp_str[16];
+    snprintf(temp_str, sizeof(temp_str), "Temp: %d C", temperatura);
+    ssd1306_draw_string(ssd, temp_str, 0, 0);  // Passa o ponteiro correto e remove o 'true'
+
+    // Se a temperatura estiver fixada, mostra a mensagem correspondente
+    // if (is_temperature_locked) {
+    //     ssd1306_draw_string(ssd, "Temp locked!", 0, 10); // Mostra que a temperatura está fixada
+    // }
+
+    ssd1306_send_data(ssd);  // Envia os dados para o display
+}
+
+int main() {
     stdio_init_all();  // Inicializa a comunicação padrão
+    
+
+    gpio_init(BUZZER_PIN);
+    gpio_set_dir(BUZZER_PIN, GPIO_OUT);
 
     pwm_setup(LED_RED);  // Configura o PWM para o LED vermelho
     pwm_setup(LED_BLUE); // Configura o PWM para o LED azul
