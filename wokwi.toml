@@ -1,0 +1,4 @@
+[wokwi]
+version = 1
+firmware = "build/sys_controle_morcegos.uf2"
+elf = "build/sys_controle_morcegos.elf"
