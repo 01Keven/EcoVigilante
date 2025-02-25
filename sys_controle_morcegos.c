@@ -40,8 +40,8 @@
 static volatile bool pwm_enabled = true;  // Flag para controlar o PWM
 static volatile uint32_t last_button_a_time = 0;  // Controle de debounce do botão A
 static volatile uint32_t last_button_joy_time = 0;  // Controle de debounce do botão do joystick
-static volatile bool is_border_thick = false;  // Alterna a espessura da borda
-static volatile bool is_square_red = true;    // Controle da cor do quadrado
+
+
 
 // Variável para armazenar o estado do joystick
 static volatile bool joystick_activated = false;
@@ -99,7 +99,9 @@ int map_adc_to_screen(int adc_value, int center_value, int screen_max) {
 // Definição da variável temperatura
 int temperatura = 0;  // Temperatura inicial como 28°C
 // Variável global para controlar se a temperatura foi fixada
-static volatile bool is_temperature_locked = false; 
+static volatile bool is_temperature_locked = false;
+
+static volatile bool is_qualidade_ar_locked = false; 
 
 // Função de interrupção para o GPIO
 static void gpio_irq_handler(uint gpio, uint32_t events) {
@@ -107,16 +109,14 @@ static void gpio_irq_handler(uint gpio, uint32_t events) {
         uint32_t current_time = time_us_32();
         if (current_time - last_button_a_time > 200000) { // Evita debounce
             last_button_a_time = current_time;
-
-            // Alterna a fixação da temperatura
-            is_temperature_locked = !is_temperature_locked;
+            is_temperature_locked = !is_temperature_locked;  // Alterna a fixação da temperatura
         }
     }
     if (gpio == BUTTON_JOY) {
         uint32_t current_time = time_us_32();
         if (current_time - last_button_joy_time > 200000) { // Evita debounce
             last_button_joy_time = current_time;
-            is_square_red = !is_square_red;  // Alterna a cor do quadrado
+            // is_qualidade_ar_locked = !is_qualidade_ar_locked;  // Alterna a fixação da qualidade do ar
         }
     }
 }
@@ -188,6 +188,59 @@ void update_temperature() {
     }
 }
 
+// Definição da variável qualidade do ar
+int qualidade_ar = 50;  // Qualidade inicial do ar (valor médio de 50)
+int qualidade_ar_max = 100;  // Máximo de qualidade de ar
+int qualidade_ar_min = 0;    // Mínimo de qualidade de ar
+
+
+// Função para atualizar a qualidade do ar com base no movimento do joystick
+void update_air_quality() {
+    gpio_init(BUZZER_PIN);
+    gpio_set_dir(BUZZER_PIN, GPIO_OUT);
+    pwm_buzzer_setup(BUZZER_PIN, BUZZER_FREQUENCY);
+
+    uint16_t adc_x = read_adc(1);  // Lê o valor do eixo X do joystick
+    int16_t offset_x = adc_x - JOYSTICK_CENTER_X; // Calcula o deslocamento do eixo X
+
+    // Verifica se o joystick foi movido além da zona morta
+    if (abs(offset_x) > JOYSTICK_DEADZONE) {
+        joystick_activated = true;  // Ativa o joystick quando ele é movido
+    }
+
+    // Atualiza a qualidade do ar com base no movimento do joystick
+    if (!is_qualidade_ar_locked) {
+        // Se o joystick foi movido para a direita (qualidade do ar melhora)
+        if (offset_x > JOYSTICK_DEADZONE) {
+            qualidade_ar += 1;  // Aumenta a qualidade do ar lentamente
+        }
+        // Se o joystick foi movido para a esquerda (qualidade do ar piora)
+        else if (offset_x < -JOYSTICK_DEADZONE) {
+            if (qualidade_ar > qualidade_ar_min) {
+                qualidade_ar -= 1;  // Diminui a qualidade do ar lentamente
+            }
+        }
+
+        // Limita a qualidade do ar dentro dos valores extremos
+        if (qualidade_ar < qualidade_ar_min) qualidade_ar = qualidade_ar_min;
+        if (qualidade_ar > qualidade_ar_max) qualidade_ar = qualidade_ar_max;
+    }
+
+    // Lógica para acender LEDs baseados na qualidade do ar
+    if (qualidade_ar < 50) {
+        gpio_put(LED_RED, 1);  // Acende o LED vermelho
+        gpio_put(LED_GREEN, 0); // Apaga o LED verde
+        gpio_put(LED_BLUE, 0);  // Apaga o LED azul
+        pwm_set_gpio_level(BUZZER_PIN, 32767);  // Emite som alto no buzzer
+        sleep_ms(500);
+        pwm_set_gpio_level(BUZZER_PIN, 0);  // Desliga o buzzer
+    } else {
+        gpio_put(LED_GREEN, 0);  // Apaga o LED verde
+        gpio_put(LED_RED, 0);    // Apaga o LED vermelho
+        gpio_put(LED_BLUE, 1);   // Acende o LED azul
+        pwm_set_gpio_level(BUZZER_PIN, 0);  // Desliga o buzzer
+    }
+}
 
 // Função de atualização do display
 void update_display(ssd1306_t *ssd) {
@@ -195,13 +248,19 @@ void update_display(ssd1306_t *ssd) {
 
     // Desenha a temperatura na tela
     char temp_str[16];
-    snprintf(temp_str, sizeof(temp_str), "Temp: %d C", temperatura);
+    snprintf(temp_str, sizeof(temp_str), "TEMP: %d C", temperatura);
     ssd1306_draw_string(ssd, temp_str, 0, 0);  // Passa o ponteiro correto e remove o 'true'
 
-    // Se a temperatura estiver fixada, mostra a mensagem correspondente
-    // if (is_temperature_locked) {
-    //     ssd1306_draw_string(ssd, "Temp locked!", 0, 10); // Mostra que a temperatura está fixada
-    // }
+    // Desenha a qualidade do ar na tela
+    char air_quality_str[16];
+    snprintf(air_quality_str, sizeof(air_quality_str), "QUAL. AR: %d%%", qualidade_ar);
+    ssd1306_draw_string(ssd, air_quality_str, 0, 20);
+
+    // Desenha uma barra representando a qualidade do ar
+    int air_bar_width = map_adc_to_screen(qualidade_ar, 50, SCREEN_WIDTH); // Mapeia o valor para a largura da tela
+    ssd1306_rect(ssd, 40, 60, air_bar_width, 10, true, true);
+
+
 
     ssd1306_send_data(ssd);  // Envia os dados para o display
 }
@@ -247,9 +306,11 @@ int main() {
     ssd1306_fill(&ssd, false);  // Limpa a tela
 
     while (1) {
-        update_temperature();  // Atualiza a temperatura com base no movimento do joystick
-        update_display(&ssd);  // Atualiza o display com a nova temperatura
-
-        sleep_ms(50);  // Aguarda um curto período de tempo
+        update_temperature();      // Atualiza a temperatura
+        update_air_quality();      // Atualiza a qualidade do ar
+        update_display(&ssd);      // Atualiza o display
+        sleep_ms(100);             // Delay para o próximo ciclo
     }
+
+    return 0;
 }
