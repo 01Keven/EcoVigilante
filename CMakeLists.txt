@@ -59,6 +59,7 @@ target_link_libraries(sys_controle_morcegos
         hardware_adc
         hardware_clocks
         hardware_i2c
+        pico_stdlib
         )
 
 pico_add_extra_outputs(sys_controle_morcegos)

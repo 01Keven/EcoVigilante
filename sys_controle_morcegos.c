@@ -3,6 +3,7 @@
 #include "hardware/pwm.h"
 #include "hardware/clocks.h"
 #include "hardware/adc.h"
+#include <stdlib.h>  // Para usar rand()
 #include "hardware/i2c.h"
 #include "inc/ssd1306.h"
 #include "inc/font.h"
@@ -37,17 +38,23 @@
 #define SCREEN_HEIGHT 64 // Altura da tela
 
 // Variáveis globais
+// Variáveis globais
+// Variáveis globais
 static volatile bool pwm_enabled = true;  // Flag para controlar o PWM
 static volatile uint32_t last_button_a_time = 0;  // Controle de debounce do botão A
 static volatile uint32_t last_button_joy_time = 0;  // Controle de debounce do botão do joystick
 
-
-
 // Variável para armazenar o estado do joystick
 static volatile bool joystick_activated = false;
 
-// Prototipos das funções de interrupção
-static void gpio_irq_handler(uint gpio, uint32_t events);
+// Variável para armazenar a quantidade de morcegos
+static volatile int morcegos = 50; 
+
+// Função para gerar um número aleatório entre 10 e 100
+int gerar_morcegos() {
+    return (rand() % 171) + 10; // Gera um número entre 10 e 100
+}
+
 
 // Inicialização do PWM
 void pwm_setup(uint pin) {
@@ -96,6 +103,8 @@ int map_adc_to_screen(int adc_value, int center_value, int screen_max) {
 }
 
 
+
+
 // Definição da variável temperatura
 int temperatura = 0;  // Temperatura inicial como 28°C
 // Variável global para controlar se a temperatura foi fixada
@@ -119,8 +128,12 @@ static void gpio_irq_handler(uint gpio, uint32_t events) {
             // is_qualidade_ar_locked = !is_qualidade_ar_locked;  // Alterna a fixação da qualidade do ar
         }
     }
-}
+    if (gpio == BUTTON_B) {
+        morcegos = gerar_morcegos();
 
+        printf("Botão pressionado! Morcegos atualizados para %d\n", morcegos);
+    }
+}
 
 // Atualiza a temperatura com base no movimento do joystick
 // Função de atualização da temperatura com base no movimento do joystick
@@ -231,7 +244,7 @@ void update_air_quality() {
         gpio_put(LED_RED, 1);  // Acende o LED vermelho
         gpio_put(LED_GREEN, 0); // Apaga o LED verde
         gpio_put(LED_BLUE, 0);  // Apaga o LED azul
-        pwm_set_gpio_level(BUZZER_PIN, 32767);  // Emite som alto no buzzer
+        pwm_set_gpio_level(BUZZER_PIN, 1208);  // Emite som alto no buzzer
         sleep_ms(500);
         pwm_set_gpio_level(BUZZER_PIN, 0);  // Desliga o buzzer
     } else {
@@ -241,6 +254,9 @@ void update_air_quality() {
         pwm_set_gpio_level(BUZZER_PIN, 0);  // Desliga o buzzer
     }
 }
+
+
+
 
 // Função de atualização do display
 void update_display(ssd1306_t *ssd) {
@@ -254,16 +270,30 @@ void update_display(ssd1306_t *ssd) {
     // Desenha a qualidade do ar na tela
     char air_quality_str[16];
     snprintf(air_quality_str, sizeof(air_quality_str), "QUAL. AR: %d%%", qualidade_ar);
-    ssd1306_draw_string(ssd, air_quality_str, 0, 20);
+    ssd1306_draw_string(ssd, air_quality_str, 0, 15);
 
     // Desenha uma barra representando a qualidade do ar
-    int air_bar_width = map_adc_to_screen(qualidade_ar, 50, SCREEN_WIDTH); // Mapeia o valor para a largura da tela
-    ssd1306_rect(ssd, 40, 60, air_bar_width, 10, true, true);
+    int air_bar_width = map_adc_to_screen(qualidade_ar, 50, 35); // Mapeia o valor para a largura da tela
+    ssd1306_rect(ssd, 14, 110, air_bar_width, 10, true, true);
 
+    
+    int quantidade_morcegos_atual = morcegos;
 
+    if (quantidade_morcegos_atual < 50 )
+    {
+        
+    } else if (quantidade_morcegos_atual < 150) {
+        
+    }
+
+    char texto[20];
+    sprintf(texto, "MORCEGOS: %d", morcegos); 
+    ssd1306_draw_string(ssd, texto, 0, 30);
 
     ssd1306_send_data(ssd);  // Envia os dados para o display
 }
+
+
 
 int main() {
     stdio_init_all();  // Inicializa a comunicação padrão
@@ -283,6 +313,13 @@ int main() {
     gpio_set_dir(BUTTON_A, GPIO_IN);
     gpio_pull_up(BUTTON_A);  // Habilita o pull-up para o botão A
     gpio_set_irq_enabled_with_callback(BUTTON_A, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);  // Configura a interrupção para o botão A
+
+    gpio_init(BUTTON_B);
+    gpio_set_dir(BUTTON_B, GPIO_IN);
+    gpio_pull_up(BUTTON_B); // Ativa pull-up interno
+    gpio_set_irq_enabled_with_callback(BUTTON_B, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
+
+
 
     gpio_init(BUTTON_JOY); // Inicializa o botão do joystick
     gpio_set_dir(BUTTON_JOY, GPIO_IN);
@@ -307,8 +344,8 @@ int main() {
 
     while (1) {
         update_temperature();      // Atualiza a temperatura
-        update_air_quality();      // Atualiza a qualidade do ar
-        update_display(&ssd);      // Atualiza o display
+        update_air_quality();
+        update_display(&ssd);    // Atualiza a qualidade do ar
         sleep_ms(100);             // Delay para o próximo ciclo
     }
 
