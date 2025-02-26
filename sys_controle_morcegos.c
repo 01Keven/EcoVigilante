@@ -7,8 +7,15 @@
 #include "hardware/i2c.h"
 #include "inc/ssd1306.h"
 #include "inc/font.h"
+#include "ws2812.pio.h"
+#include "inc/led_matriz.h"// Onde estão os caracteres armazenados para mostrar no display
+#include <time.h>
+#include <stdint.h>
+#include <stdbool.h>
+
 
 // Definições dos pinos e parâmetros
+#define MATRIZ_LED_PIN 7  // Pino da matriz de LEDs 5x5
 #define I2C_PORT i2c1  // Porta I2C utilizada
 #define I2C_SDA 14     // Pino SDA do I2C
 #define I2C_SCL 15     // Pino SCL do I2C
@@ -49,6 +56,9 @@ static volatile bool joystick_activated = false;
 
 // Variável para armazenar a quantidade de morcegos
 static volatile int morcegos = 50; 
+
+uint32_t get_time_ms(void);
+
 
 // Função para gerar um número aleatório entre 10 e 100
 int gerar_morcegos() {
@@ -225,12 +235,12 @@ void update_air_quality() {
     if (!is_qualidade_ar_locked) {
         // Se o joystick foi movido para a direita (qualidade do ar melhora)
         if (offset_x > JOYSTICK_DEADZONE) {
-            qualidade_ar += 1;  // Aumenta a qualidade do ar lentamente
+            qualidade_ar += 10;  // Aumenta a qualidade do ar lentamente
         }
         // Se o joystick foi movido para a esquerda (qualidade do ar piora)
         else if (offset_x < -JOYSTICK_DEADZONE) {
             if (qualidade_ar > qualidade_ar_min) {
-                qualidade_ar -= 1;  // Diminui a qualidade do ar lentamente
+                qualidade_ar -= 10;  // Diminui a qualidade do ar lentamente
             }
         }
 
@@ -255,13 +265,56 @@ void update_air_quality() {
     }
 }
 
+volatile int morcegos_detectados = 0;
+volatile bool alerta_ativo = false;  // Indica se o alerta está ativo
+volatile time_t tempo_inicio = 0;    // Registra o tempo inicial do alerta
 
+// Função que verifica se os 5 segundos já passaram
+void verificar_tempo_alerta() {
+    if (alerta_ativo && (time(NULL) - tempo_inicio) >= 5) {
+        alerta_ativo = false; // **Desativa o alerta**
+        set_one_led(0, 0, 0, simbolo_perigo); // **Apaga o LED**
+    }
+}
 
+// Função que inicia o alerta de piscar LEDs **somente se necessário**
+void iniciar_alerta_led(int novo_numero) {
+    if (novo_numero > 50 && !alerta_ativo) {  // **Só ativa se o número for maior que 50**
+        alerta_ativo = true;
+        tempo_inicio = time(NULL); // Armazena o tempo de início
+    }
+}
+
+// Atualiza a quantidade de morcegos e gerencia o alerta
+void atualizar_morcegos(int novo_numero) {
+    if (novo_numero != morcegos_detectados) {
+        morcegos_detectados = novo_numero;
+
+        if (novo_numero > 50) {
+            iniciar_alerta_led(novo_numero);  // **Ativa o alerta se necessário**
+        } else {
+            alerta_ativo = false; // **Desativa o alerta se não há perigo**
+            set_one_led(0, 0, 0, simbolo_perigo); // **Apaga o LED imediatamente**
+        }
+    }
+}
+
+// Função para exibir a mensagem de boas-vindas
+void show_welcome_message(ssd1306_t *ssd) {
+    ssd1306_fill(ssd, false);  // Limpa a tela
+    ssd1306_draw_string(ssd, "BEM VINDO", 25, 25);  // Exibe a mensagem de boas-vindas
+    ssd1306_send_data(ssd);  // Atualiza o display
+
+    sleep_ms(5000);  // Espera 5 segundos
+
+    ssd1306_fill(ssd, false);  // Limpa a tela após o tempo de espera
+    ssd1306_send_data(ssd);  // Atualiza o display
+}
 
 // Função de atualização do display
 void update_display(ssd1306_t *ssd) {
     ssd1306_fill(ssd, false);  // Limpa a tela
-
+    
     // Desenha a temperatura na tela
     char temp_str[16];
     snprintf(temp_str, sizeof(temp_str), "TEMP: %d C", temperatura);
@@ -277,27 +330,64 @@ void update_display(ssd1306_t *ssd) {
     ssd1306_rect(ssd, 14, 110, air_bar_width, 10, true, true);
 
     
-    int quantidade_morcegos_atual = morcegos;
-
-    if (quantidade_morcegos_atual < 50 )
-    {
-        
-    } else if (quantidade_morcegos_atual < 150) {
-        
-    }
-
+    // Atualiza a quantidade de morcegos
     char texto[20];
-    sprintf(texto, "MORCEGOS: %d", morcegos); 
+    sprintf(texto, "MORCEGOS: %d", morcegos);
     ssd1306_draw_string(ssd, texto, 0, 30);
 
-    ssd1306_send_data(ssd);  // Envia os dados para o display
+    ssd1306_send_data(ssd);  // **Atualiza o display primeiro!**
+
+    // Atualiza a contagem de morcegos e ativa/desativa o alerta
+    atualizar_morcegos(morcegos);
+
+}
+
+
+// Função para exibir o alerta no display
+void show_alert(ssd1306_t *ssd) {
+    ssd1306_fill(ssd, false); // Limpa o display
+    ssd1306_draw_string(ssd, "CONTAMINACAO", 0, 0);
+    
+    pwm_set_gpio_level(LED_RED, 65535);
+    gpio_put(LED_GREEN, 0);
+    gpio_put(LED_BLUE, 0);
+    
+    pwm_set_gpio_level(BUZZER_PIN, 12767);
+    sleep_ms(500);
+    pwm_set_gpio_level(BUZZER_PIN, 0);
+    
+    char alerta[64];
+    snprintf(alerta, sizeof(alerta), "TEMP: %dC", temperatura);
+    ssd1306_draw_string(ssd, alerta, 0, 15);
+    
+    snprintf(alerta, sizeof(alerta), "QUAL AR: %d", qualidade_ar);
+    ssd1306_draw_string(ssd, alerta, 0, 30);
+    
+    snprintf(alerta, sizeof(alerta), "MORCEGOS: %d", morcegos);
+    ssd1306_draw_string(ssd, alerta, 0, 45);
+    
+    ssd1306_send_data(ssd);
+    sleep_ms(5000);
+    ssd1306_fill(ssd, false); // Limpa o display ao sair do alerta
+    ssd1306_send_data(ssd);
+}
+
+// Função para verificar condição de alerta
+void check_alert_conditions(ssd1306_t *ssd) {
+    if (temperatura > 40 && qualidade_ar < 70 && morcegos > 50) {
+        show_alert(ssd);
+    }
 }
 
 
 
 int main() {
     stdio_init_all();  // Inicializa a comunicação padrão
-    
+    // Variáveis e configurações PIO
+    PIO pio = pio0;
+    int sm = 0;
+    uint offset = pio_add_program(pio, &ws2812_program);  // Adiciona o programa para controlar a matriz de LEDs
+    ws2812_program_init(pio, sm, offset, MATRIZ_LED_PIN, 800000, false);  // Inicializa a matriz de LEDs
 
     gpio_init(BUZZER_PIN);
     gpio_set_dir(BUZZER_PIN, GPIO_OUT);
@@ -342,11 +432,25 @@ int main() {
     ssd1306_send_data(&ssd);  // Envia os dados de configuração para o display
     ssd1306_fill(&ssd, false);  // Limpa a tela
 
+    // Exibe a mensagem de boas-vindas por 5 segundos
+    show_welcome_message(&ssd);
+
     while (1) {
         update_temperature();      // Atualiza a temperatura
         update_air_quality();
+        check_alert_conditions(&ssd);
+
         update_display(&ssd);    // Atualiza a qualidade do ar
         sleep_ms(100);             // Delay para o próximo ciclo
+        if (alerta_ativo) {
+            set_one_led(50, 0, 0, simbolo_perigo); 
+            sleep_ms(500);
+            set_one_led(0, 0, 0, simbolo_perigo);
+            sleep_ms(500);
+        }
+
+        verificar_tempo_alerta(); // **Garante que o alerta pare após 5 segundos**
+        
     }
 
     return 0;
