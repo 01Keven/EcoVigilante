@@ -35,7 +35,7 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(sys_controle_morcegos sys_controle_morcegos.c inc/ssd1306.c inc/ssd1306.h inc/led_matriz.h inc/led_matriz.c)
+add_executable(sys_controle_morcegos sys_controle_morcegos.c inc/ssd1306.c inc/ssd1306.h inc/led_matriz.h inc/led_matriz.c )
 
 pico_set_program_name(sys_controle_morcegos "sys_controle_morcegos")
 pico_set_program_version(sys_controle_morcegos "0.1")

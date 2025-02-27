@@ -34,8 +34,6 @@
 // Frequência do buzzer (em Hz)
 #define BUZZER_FREQUENCY 1000  // Frequência padrão do buzzer
 
-
-
 // Ajuste do centro do joystick
 #define JOYSTICK_CENTER_X 1939 // Valor de centro do eixo X
 #define JOYSTICK_CENTER_Y 2180 // Valor de centro do eixo Y
@@ -59,6 +57,21 @@ static volatile int morcegos = 50;
 
 uint32_t get_time_ms(void);
 
+// Definição da variável temperatura
+int temperatura = 0;  // Temperatura inicial como 28°C
+// Variável global para controlar se a temperatura foi fixada
+static volatile bool is_temperature_locked = false;
+
+static volatile bool is_qualidade_ar_locked = false; 
+
+// Definição da variável qualidade do ar
+int qualidade_ar = 50;  // Qualidade inicial do ar (valor médio de 50)
+int qualidade_ar_max = 100;  // Máximo de qualidade de ar
+int qualidade_ar_min = 0;    // Mínimo de qualidade de ar
+
+volatile int morcegos_detectados = 0;
+volatile bool alerta_ativo = false;  // Indica se o alerta está ativo
+volatile time_t tempo_inicio = 0;    // Registra o tempo inicial do alerta
 
 // Função para gerar um número aleatório entre 10 e 100
 int gerar_morcegos() {
@@ -112,16 +125,6 @@ int map_adc_to_screen(int adc_value, int center_value, int screen_max) {
     return mapped_value;
 }
 
-
-
-
-// Definição da variável temperatura
-int temperatura = 0;  // Temperatura inicial como 28°C
-// Variável global para controlar se a temperatura foi fixada
-static volatile bool is_temperature_locked = false;
-
-static volatile bool is_qualidade_ar_locked = false; 
-
 // Função de interrupção para o GPIO
 static void gpio_irq_handler(uint gpio, uint32_t events) {
     if (gpio == BUTTON_A) {
@@ -146,8 +149,6 @@ static void gpio_irq_handler(uint gpio, uint32_t events) {
 }
 
 // Atualiza a temperatura com base no movimento do joystick
-// Função de atualização da temperatura com base no movimento do joystick
-// Função para atualizar a temperatura com base no movimento do joystick
 void update_temperature() {
     gpio_init(BUZZER_PIN);
     gpio_set_dir(BUZZER_PIN, GPIO_OUT);
@@ -178,7 +179,7 @@ void update_temperature() {
         }
 
         // Limita a temperatura dentro dos valores extremos
-        if (temperatura < 10) temperatura = 10; // Garante que a temperatura não seja menor que 28
+        if (temperatura < 10) temperatura = 10; // Garante que a temperatura não seja menor que 10
         if (temperatura > 50) temperatura = 50; // Limita o valor máximo
     }
 
@@ -210,12 +211,6 @@ void update_temperature() {
         gpio_put(BUZZER_PIN, 0);  // Desliga o buzzer
     }
 }
-
-// Definição da variável qualidade do ar
-int qualidade_ar = 50;  // Qualidade inicial do ar (valor médio de 50)
-int qualidade_ar_max = 100;  // Máximo de qualidade de ar
-int qualidade_ar_min = 0;    // Mínimo de qualidade de ar
-
 
 // Função para atualizar a qualidade do ar com base no movimento do joystick
 void update_air_quality() {
@@ -264,10 +259,6 @@ void update_air_quality() {
         pwm_set_gpio_level(BUZZER_PIN, 0);  // Desliga o buzzer
     }
 }
-
-volatile int morcegos_detectados = 0;
-volatile bool alerta_ativo = false;  // Indica se o alerta está ativo
-volatile time_t tempo_inicio = 0;    // Registra o tempo inicial do alerta
 
 // Função que verifica se os 5 segundos já passaram
 void verificar_tempo_alerta() {
@@ -318,16 +309,20 @@ void update_display(ssd1306_t *ssd) {
     // Desenha a temperatura na tela
     char temp_str[16];
     snprintf(temp_str, sizeof(temp_str), "TEMP: %d C", temperatura);
-    ssd1306_draw_string(ssd, temp_str, 0, 0);  // Passa o ponteiro correto e remove o 'true'
+    ssd1306_draw_string(ssd, temp_str, 0, 15);  // Passa o ponteiro correto e remove o 'true'
 
     // Desenha a qualidade do ar na tela
     char air_quality_str[16];
-    snprintf(air_quality_str, sizeof(air_quality_str), "QUAL. AR: %d%%", qualidade_ar);
-    ssd1306_draw_string(ssd, air_quality_str, 0, 15);
+    snprintf(air_quality_str, sizeof(air_quality_str), "QUAL AR: %d%%", qualidade_ar);
+    ssd1306_draw_string(ssd, air_quality_str, 0, 0);
 
     // Desenha uma barra representando a qualidade do ar
-    int air_bar_width = map_adc_to_screen(qualidade_ar, 50, 35); // Mapeia o valor para a largura da tela
-    ssd1306_rect(ssd, 14, 110, air_bar_width, 10, true, true);
+    int air_bar_width = map_adc_to_screen(qualidade_ar, 70, 30); // Mapeia o valor para a largura da tela
+    ssd1306_rect(ssd, 1, 110, air_bar_width, 5, true, true);
+    
+    // Desenha uma barra representando a qualidade do ar
+    int temp_bar_width = map_adc_to_screen(temperatura, 70, 30); // Mapeia o valor para a largura da tela
+    ssd1306_rect(ssd, 15, 110, temp_bar_width, 5, true, true);
 
     
     // Atualiza a quantidade de morcegos
@@ -341,7 +336,6 @@ void update_display(ssd1306_t *ssd) {
     atualizar_morcegos(morcegos);
 
 }
-
 
 // Função para exibir o alerta no display
 void show_alert(ssd1306_t *ssd) {
@@ -380,7 +374,6 @@ void check_alert_conditions(ssd1306_t *ssd) {
 }
 
 
-
 int main() {
     stdio_init_all();  // Inicializa a comunicação padrão
     // Variáveis e configurações PIO
@@ -388,7 +381,8 @@ int main() {
     int sm = 0;
     uint offset = pio_add_program(pio, &ws2812_program);  // Adiciona o programa para controlar a matriz de LEDs
     ws2812_program_init(pio, sm, offset, MATRIZ_LED_PIN, 800000, false);  // Inicializa a matriz de LEDs
-
+    
+    
     gpio_init(BUZZER_PIN);
     gpio_set_dir(BUZZER_PIN, GPIO_OUT);
 
