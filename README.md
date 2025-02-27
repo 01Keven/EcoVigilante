@@ -1,6 +1,10 @@
 # Introdução
 O sistema tem como principal objetivo acompanhar as condições dos abrigos artificiais (Bat Houses) e locais propensos à presença desses animais, como telhados e sótãos. Com isso, tem-se o objetivo de garantir um ambiente adequado para os morcegos e, ao mesmo tempo, reduzir riscos à saúde pública, prevenindo doenças como a histoplasmose, que pode ser transmitida pelas fezes desses animais e propagação do vírus da raiva, por animais portadores do mesmo.
 
+# Link video
+
+https://drive.google.com/file/d/1wdwz_EffcVYzUwqQQn4KWlYXJ2ejYVFl/view?usp=sharing
+
 # Dependências e Bibliotecas
 O projeto requer as seguintes bibliotecas:
 - `pico/stdlib.h`: Biblioteca padrão para desenvolvimento no Raspberry Pi Pico.
